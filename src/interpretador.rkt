@@ -38,4 +38,33 @@
 ;;Generar Datatypes y parser
 (sllgen:make-define-datatypes scanner-spec grammar)
 (define scan&parse (sllgen:make-string-parser scanner-spec grammar))
+
+;;Sistema de tipos y validacion
+
+(define-datatype tipo-exp tipo-exp?
+  (int-type)
+  (float-type)
+  (string-type)
+  (bool-type)
+  (void-type)
+  (sat-type)
+  (list-type (elem-type tipo-exp?))
+  (vector-type (elem-type tipo-exp?))
+  (dict-type (key-type tipo-exp?) (val-type tipo-exp?))
+  (proc-type))
+;;Predicado para validad coincidencia entre tipo y valor expresado
+(define type-matches?
+  (lambda (tipo val)
+    (cases tipo-exp tipo
+      (void-type () #t)
+      (int-type () (integer? val))
+      (float-type () (number? val))
+      (string-type () (string? val))
+      (bool-type () (boolean? val))
+      (sat-type () (and (pair? val) (eqv? (car val) 'sat-instance)))
+      (list-type (t) (list? val))
+      (vector-type (t) (vector? val))
+      (dict-type (t1 t2) (and (pair? val) (eqv? (car val) 'dict)))
+      (proc-type () (and (pair? val) (eqv? (car val) 'closure))))))
+  
             
