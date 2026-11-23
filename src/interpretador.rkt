@@ -67,4 +67,16 @@
       (dict-type (t1 t2) (and (pair? val) (eqv? (car val) 'dict)))
       (proc-type () (and (pair? val) (eqv? (car val) 'closure))))))
   
-            
+;;Memoria y ambientes
+(define-datatype referencia referencia?
+  (a-ref (pos integer?) (vec vector?)))
+
+(define deref
+  (lambda (ref)
+    (cases referencia ref
+    (a-ref (pos vec) (vector-ref vec pos)))))
+
+(define primitive-setref!
+  (lambda (ref val)
+    (cases referencia ref
+      (a-ref (pos vec) (vector-set! vec pos val)))))
