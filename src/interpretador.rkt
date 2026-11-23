@@ -30,5 +30,9 @@
     (declaracion-global (tipo identificador "=" expresion ";") decl-var-global)
     (declaracion-global ("const" tipo identificador "=" expresion ";") decl-const-global)
     (declaracion-global ("proc" identificador "=" expresion ";") decl-proc-global)
-    ))
+    ;;Expresiones basicas y asignacion mutable
+    (expresion (numero) numero-lit)
+    (expresion (texto) texto-lit)
+    (expresion (identificador) var-exp)
+    (expresion (identificador "->" expresion) asignacion-exp)))
             
