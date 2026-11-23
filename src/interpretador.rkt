@@ -9,7 +9,7 @@
     (numero ("-" digit (arbno digit)) number)
     (numero (digit (arbno digit) "." digit (arbno digit)) number)
     (numero ("-" digit (arbno digit) "." digit (arbno digit)) number)
-    (texto ("\"" (arbno (not "\"")) "\"") string)))
+    (texto ("\"" (arbno (not #\")) "\"") string)))
 
 ;;Especificacion gramatical
 
@@ -29,10 +29,13 @@
     ;;Declaraciones globales
     (declaracion-global (tipo identificador "=" expresion ";") decl-var-global)
     (declaracion-global ("const" tipo identificador "=" expresion ";") decl-const-global)
-    (declaracion-global ("proc" identificador "=" expresion ";") decl-proc-global)
     ;;Expresiones basicas y asignacion mutable
     (expresion (numero) numero-lit)
     (expresion (texto) texto-lit)
     (expresion (identificador) var-exp)
-    (expresion (identificador "->" expresion) asignacion-exp)))
+    (expresion ("set" identificador "->" expresion) asignacion-exp)))
+
+;;Generar Datatypes y parser
+(sllgen:make-define-datatypes scanner-spec grammar)
+(define scan&parse (sllgen:make-string-parser scanner-spec grammar))
             
