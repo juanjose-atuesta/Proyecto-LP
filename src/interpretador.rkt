@@ -97,3 +97,36 @@
   (lambda (syms vals tipos consts-flags parent-env)
     (let ((refs (map (lambda (v) (a-ref 0 (vector v))) vals)))
       (extended-env-record syms refs tipos consts-flags parent-env))))
+
+(define apply-env-binding
+  (lambda (env search-sym)
+    (cases ambiente env
+      (empty-env-record () (eopl:error 'apply-env "Variable no declarada: ~s" search-sym))
+      (extended-env-record (syms refs tipos consts parent)
+                           (let loop ((s syms) (r refs) (t tipos) (c consts))
+                                      (cond
+                                        ((null? s) (apply-env-binding parent search-sym))
+                                        ((eqv? (car s) search-sym) (list (car r) (car t) (car c)))
+                                        (else (loop (cdr s) (cdr r) (cdr t) (cdr c)))))))))
+
+(define apply-env
+  (lambda (env search-sym)
+    (let ((binding (apply-env-binding env search-sym)))
+      (deref (car binding)))))
+;;Asignacion mutable con operador ->
+(define assign-var!
+  (lambda (env search-sym new-val)
+    (let* ((binding (apply-env-binding env search-sym))
+           (ref (car binding))
+           (tipo (cadr binding))
+           (is-const (caddr binding)))
+      (cond
+        (is-const (eopl:error 'assign-var! "Error: No se puede modificar la constante ~s" search-sym))
+        ((not (type-matches? tipo new-val))
+         (eopl:error 'assign-var! "Error de Tipo: El valor no coincide con el tipo de ~s" search-sym))
+        (else
+         (primitive-setref! ref new-val))))))
+                     
+                    
+                
+                                
