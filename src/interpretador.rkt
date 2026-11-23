@@ -80,3 +80,20 @@
   (lambda (ref val)
     (cases referencia ref
       (a-ref (pos vec) (vector-set! vec pos val)))))
+
+;;Representacion del ambiente
+(define-datatype ambiente ambiente?
+  (empty-env-record)
+  (extended-env-record
+   (syms (list-of symbol?))
+   (refs (list-of referencia?))
+   (tipos (list-of scheme-value?))
+   (consts (list-of boolean?))
+   (parent ambiente?)))
+(define scheme-value? (lambda (v) #t))
+(define empty-env (lambda () (empty-env-record)))
+
+(define extend-env-vars
+  (lambda (syms vals tipos consts-flags parent-env)
+    (let ((refs (map (lambda (v) (a-ref 0 (vector v))) vals)))
+      (extended-env-record syms refs tipos consts-flags parent-env))))
