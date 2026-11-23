@@ -14,7 +14,7 @@
 ;;Especificacion gramatical
 
 (define grammar
-  '((programa ("GLOBALS" "{" (arbno declaracion-global) "}" "PROGRAM" "{" "proc" "main" "(" ")" "{" expresion "}" "}") un-programa)
+  '((programa ("GLOBALS" "{" (arbno declaracion-global) "}" "PROGRAM" "{" "proc" "main" "(" ")" "{" "return" expresion ";" "}" "}") un-programa)
     ;;Tipos de datos
     (tipo ("int") tipo-int)
     (tipo ("float") tipo-float)
@@ -32,12 +32,22 @@
     ;;Expresiones basicas y asignacion mutable
     (expresion (numero) numero-lit)
     (expresion (texto) texto-lit)
+    (expresion ("True") true-lit)
+    (expresion ("False") false-lit)
     (expresion (identificador) var-exp)
     (expresion ("set" identificador "->" expresion) asignacion-exp)))
 
 ;;Generar Datatypes y parser
 (sllgen:make-define-datatypes scanner-spec grammar)
 (define scan&parse (sllgen:make-string-parser scanner-spec grammar))
+(define show-the-datatypes
+  (lambda () (sllgen:list-define-datatypes scanner-spec grammar)))
+(define just-scan
+  (sllgen:make-string-scanner scanner-spec grammar))
+(define interpretador
+  (sllgen:make-rep-loop "-->"
+     (lambda (pgm) (eval-program pgm))
+     (sllgen:make-stream-parser scanner-spec grammar)))
 
 ;;Sistema de tipos y validacion
 
@@ -145,6 +155,8 @@
     (cases expresion exp
       (numero-lit (num) num)
       (texto-lit (txt) txt)
+      (true-lit () #t)
+      (false-lit () #f)
       (var-exp (id) (apply-env env id))
       (asignacion-exp (id rhs)
                       (let ((val (eval-expression rhs env)))
