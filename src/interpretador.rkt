@@ -126,6 +126,30 @@
          (eopl:error 'assign-var! "Error de Tipo: El valor no coincide con el tipo de ~s" search-sym))
         (else
          (primitive-setref! ref new-val))))))
+
+;;Evaluador principal
+(define eval-program
+  (lambda (pgm)
+    (cases programa pgm
+      (un-programa (decls-globales cuerpo-main)
+                   (let ((env-global (eval-globals decls-globales (empty-env))))
+                   (eval-expression cuerpo-main env-global))))))
+(define eval-globals
+  (lambda (decls env)
+    (if (null? decls)
+        env
+        (eval-globals (cdr decls) env))))
+
+(define eval-expression
+  (lambda (exp env)
+    (cases expresion exp
+      (numero-lit (num) num)
+      (texto-lit (txt) txt)
+      (var-exp (id) (apply-env env id))
+      (asignacion-exp (id rhs)
+                      (let ((val (eval-expression rhs env)))
+                        (assign-var! env id val)))
+      (else (eopl:error 'eval-expresion "Expresion no sortada ")))))
                      
                     
                 
