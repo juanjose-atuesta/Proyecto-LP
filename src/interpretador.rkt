@@ -79,93 +79,142 @@
       (tipo-vector (t1) (list 'vector (tipo->texto t1)))
       (tipo-dict (t1 t2) (list 'dict (tipo->texto t1) (tipo->texto t2))))))
 
-  
-;;Memoria y ambientes
-(define-datatype referencia referencia?
-  (a-ref (pos integer?) (vec vector?)))
+;;Referencias basado en el interpretador_asign, ademas de la posicion y el vector, guarda el tipo si es const
+(define-datatype reference reference?
+  (a-ref (position integer?)
+         (vec vector?)
+         (tipo tipo?)
+         (const? boolean?)))
 
 (define deref
   (lambda (ref)
-    (cases referencia ref
-    (a-ref (pos vec) (vector-ref vec pos)))))
+    (primitive-deref ref)))
+
+(define primitive-deref
+  (lambda (ref)
+    (cases reference ref
+      (a-ref (pos vec tipo const?)
+             (vector-ref vec pos)))))
+
+;;setref!: Modifica una variable, operador ->. Valida const y tipo.
+(define setref!
+  (lambda (ref val)
+    (cases reference ref
+      (a-ref (pos vec tipo const?)
+             (cond
+               (const? (eopl:error 'setref! "No se puede modificar una constante (const)"))
+               ((type-matches? tipo val) (primitive-setref! ref val))
+               (else (eopl:error 'setref! "Error de tipo: se esperaba ~s y llego ~s"
+                                 (tipo->texto tipo) val)))))))
 
 (define primitive-setref!
   (lambda (ref val)
-    (cases referencia ref
-      (a-ref (pos vec) (vector-set! vec pos val)))))
+    (cases reference ref
+      (a-ref (pos vec tipo const?)
+             (vector-set! vec pos val)))))
 
-;;Representacion del ambiente
+;;Ambientes basado en interpretador_asign
 (define-datatype ambiente ambiente?
   (empty-env-record)
   (extended-env-record
    (syms (list-of symbol?))
-   (refs (list-of referencia?))
-   (tipos (list-of scheme-value?))
+   (vec vector?)
+   (tipos (list-of tipo?))
    (consts (list-of boolean?))
-   (parent ambiente?)))
-(define scheme-value? (lambda (v) #t))
-(define empty-env (lambda () (empty-env-record)))
+   (env ambiente?)))
 
-(define extend-env-vars
-  (lambda (syms vals tipos consts-flags parent-env)
-    (let ((refs (map (lambda (v) (a-ref 0 (vector v))) vals)))
-      (extended-env-record syms refs tipos consts-flags parent-env))))
-
-(define apply-env-binding
-  (lambda (env search-sym)
-    (cases ambiente env
-      (empty-env-record () (eopl:error 'apply-env "Variable no declarada: ~s" search-sym))
-      (extended-env-record (syms refs tipos consts parent)
-                           (let loop ((s syms) (r refs) (t tipos) (c consts))
-                                      (cond
-                                        ((null? s) (apply-env-binding parent search-sym))
-                                        ((eqv? (car s) search-sym) (list (car r) (car t) (car c)))
-                                        (else (loop (cdr s) (cdr r) (cdr t) (cdr c)))))))))
+(define empty-env
+  (lambda ()
+    (empty-env-record)))
+;;extend-env: variables void y mutables
+(define extend-env
+  (lambda (syms vals env)
+    (extended-env-record syms
+                         (list->vector vals)
+                         (map (lambda (sym) (tipo-void)) syms)
+                         (map (lambda (sym) #f) syms)
+                         env)))
+;; extend-env-globals: Hace la validacion de tipo al crear la variable
+(define extend-env-globals
+  (lambda (decls old-env)
+    (let ((len (length decls)))
+      (let ((vec (make-vector len)))
+        (let ((env (extended-env-record (map decl->id decls)
+                                        vec
+                                        (map decl->tipo decls)
+                                        (map decl->const? decls)
+                                        old-env)))
+          (for-each
+           (lambda (pos decl)
+             (let ((val (eval-expression (decl->exp decl) env))
+                   (tipo (decl->tipo decl)))
+               (if (type-matches? tipo val)
+                   (vector-set! vec pos val)
+                   (eopl:error 'extend-env-globals "Error de tipo al crear ~s: Se esperaba ~s y llego ~s" (decl->id decl) (tipo->texto tipo) val))))
+           (iota len) decls)
+          env)))))
 
 (define apply-env
-  (lambda (env search-sym)
-    (let ((binding (apply-env-binding env search-sym)))
-      (deref (car binding)))))
-;;Asignacion mutable con operador ->
-(define assign-var!
-  (lambda (env search-sym new-val)
-    (let* ((binding (apply-env-binding env search-sym))
-           (ref (car binding))
-           (tipo (cadr binding))
-           (is-const (caddr binding)))
-      (cond
-        (is-const (eopl:error 'assign-var! "Error: No se puede modificar la constante ~s" search-sym))
-        ((not (type-matches? tipo new-val))
-         (eopl:error 'assign-var! "Error de Tipo: El valor no coincide con el tipo de ~s" search-sym))
-        (else
-         (primitive-setref! ref new-val))))))
+  (lambda (env sym)
+    (deref (apply-env-ref env sym))))
 
-;;Evaluador principal
+(define apply-env-ref
+  (lambda (env sym)
+    (cases ambiente env
+      (empty-env-record ()
+                        (eopl:error 'apply-env-ref "No existe la variable ~s" sym))
+      (extended-env-record (syms vec tipos consts old-env)
+                           (let ((pos (rib-find-position sym syms)))
+                             (if (number? pos)
+                                 (a-ref pos vec (list-ref tipos pos) (list-ref consts pos))
+                                 (apply-env-ref old-env sym)))))))
+;;Evaluador
 (define eval-program
   (lambda (pgm)
     (cases programa pgm
       (un-programa (decls-globales cuerpo-main)
-                   (let ((env-global (eval-globals decls-globales (empty-env))))
-                   (eval-expression cuerpo-main env-global))))))
-(define eval-globals
-  (lambda (decls env)
-    (if (null? decls)
-        env
-        (eval-globals (cdr decls) env))))
+                   (eval-expression cuerpo-main
+                                    (extend-env-globals decls-globales (empty-env)))))))
 
 (define eval-expression
   (lambda (exp env)
     (cases expresion exp
       (numero-lit (num) num)
-      (texto-lit (txt) txt)
+      (texto-lit (txt) (substring txt 1 (- (string-length txt) 1)))
       (true-lit () #t)
       (false-lit () #f)
       (var-exp (id) (apply-env env id))
-      (asignacion-exp (id rhs)
-                      (let ((val (eval-expression rhs env)))
-                        (assign-var! env id val)))
-      (else (eopl:error 'eval-expresion "Expresion no sortada ")))))
-                     
+      (asignacion-exp (id rhs-exp)
+                      (begin
+                        (setref!
+                         (apply-env-ref env id)
+                         (eval-expression rhs-exp env))
+                        1)))))
+
+;;Extractores
+(define decl->id
+  (lambda (decl)
+    (cases declaracion-global decl
+      (decl-var-global (texp id rhs) id)
+      (decl-const-global (texp id rhs) id))))
+
+(define decl->tipo
+  (lambda (decl)
+    (cases declaracion-global decl
+      (decl-var-global (texp id rhs) texp)
+      (decl-const-global (texp id rhs) texp))))
+
+(define decl->exp
+  (lambda (decl)
+    (cases declaracion-global decl
+      (decl-var-global (texp id rhs) rhs)
+      (decl-const-global (texp id rhs) rhs))))
+
+(define decl->const?
+  (lambda (decl)
+    (cases declaracion-global decl
+      (decl-var-global (texp id rhs) #f)
+      (decl-const-global (texp id rhs) #t))))
 
 ;;FUnciones auxiliares,se tomaron de interpretador_asign
 (define iota
