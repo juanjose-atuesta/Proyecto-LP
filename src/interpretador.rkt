@@ -50,32 +50,35 @@
      (sllgen:make-stream-parser scanner-spec grammar)))
 
 ;;Sistema de tipos y validacion
-
-(define-datatype tipo-exp tipo-exp?
-  (int-type)
-  (float-type)
-  (string-type)
-  (bool-type)
-  (void-type)
-  (sat-type)
-  (list-type (elem-type tipo-exp?))
-  (vector-type (elem-type tipo-exp?))
-  (dict-type (key-type tipo-exp?) (val-type tipo-exp?))
-  (proc-type))
-;;Predicado para validad coincidencia entre tipo y valor expresado
+;;Usa el datatype tipo que se genera con sllgen
 (define type-matches?
-  (lambda (tipo val)
-    (cases tipo-exp tipo
-      (void-type () #t)
-      (int-type () (integer? val))
-      (float-type () (number? val))
-      (string-type () (string? val))
-      (bool-type () (boolean? val))
-      (sat-type () (and (pair? val) (eqv? (car val) 'sat-instance)))
-      (list-type (t) (list? val))
-      (vector-type (t) (vector? val))
-      (dict-type (t1 t2) (and (pair? val) (eqv? (car val) 'dict)))
-      (proc-type () (and (pair? val) (eqv? (car val) 'closure))))))
+  (lambda (t val)
+    (cases tipo t
+      (tipo-void () #t)
+      (tipo-int () (integer? val))
+      (tipo-float () (number? val))
+      (tipo-string () (string? val))
+      (tipo-bool () (boolean? val))
+      (tipo-sat () #t)
+      (tipo-proc () #t)
+      (tipo-list (t1) (list? val))
+      (tipo-vector (t1) (vector? val))
+      (tipo-dict (t1 t2) #t))))
+;;tipo -> texto: tipo para los mensajes de error
+(define tipo->texto
+  (lambda (t)
+    (cases tipo t
+      (tipo-int () 'int)
+      (tipo-float () 'float)
+      (tipo-string () 'string)
+      (tipo-bool () 'bool)
+      (tipo-void () 'void)
+      (tipo-sat () 'sat)
+      (tipo-proc () 'proc)
+      (tipo-list (t1) (list 'list (tipo->texto t1)))
+      (tipo-vector (t1) (list 'vector (tipo->texto t1)))
+      (tipo-dict (t1 t2) (list 'dict (tipo->texto t1) (tipo->texto t2))))))
+
   
 ;;Memoria y ambientes
 (define-datatype referencia referencia?
