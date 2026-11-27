@@ -1,4 +1,4 @@
-#lang eopl
+﻿#lang eopl
 
 ;;Especificacion lexica
 (define scanner-spec
@@ -14,7 +14,7 @@
 ;;Especificacion gramatical
 
 (define grammar
-  '((programa ("GLOBALS" "{" (arbno declaracion-global) "}" "PROGRAM" "{" "proc" "main" "(" ")" "{" "return" expresion ";" "}" "}") un-programa)
+  '((programa ("GLOBALS" "{" (arbno declaracion-global) "}" "PROGRAM" "{" "proc" "main" "(" ")" bloque "}") un-programa)
     ;;Tipos de datos
     (tipo ("int") tipo-int)
     (tipo ("float") tipo-float)
@@ -35,7 +35,18 @@
     (expresion ("True") true-lit)
     (expresion ("False") false-lit)
     (expresion (identificador) var-exp)
-    (expresion ("set" identificador "->" expresion) asignacion-exp)))
+    (expresion ("set" identificador "->" expresion) asignacion-exp)
+    (expresion ("lambda" "(" (separated-list tipo identificador ",") ")" bloque) lambda-exp)
+    (expresion ("call" identificador "(" (separated-list expresion ",") ")") app-exp)
+    (expresion ("BLOCK" bloque) block-exp)
+    (expresion ("LOCALS" "{" (arbno declaracion-global) "}" bloque) locals-exp)
+    (bloque ("{" (arbno sentencia) "}") un-bloque)
+    (sentencia (expresion ";") sent-exp)
+    (sentencia ("return" expresion ";") sent-return)
+    (sentencia ("if" "(" expresion ")" bloque "else" bloque) sent-if)
+    (sentencia ("switch" expresion "{" (arbno "case" expresion ":" bloque) "default" ":" bloque "}") sent-switch)
+    (sentencia ("while" "(" expresion ")" bloque) sent-while)
+    (sentencia ("for" "(" expresion ";" expresion ";" expresion ")" bloque) sent-for)))
 
 ;;Generar Datatypes y parser
 (sllgen:make-define-datatypes scanner-spec grammar)
@@ -60,7 +71,7 @@
       (tipo-string () (string? val))
       (tipo-bool () (boolean? val))
       (tipo-sat () #t)
-      (tipo-proc () #t)
+      (tipo-proc () (procval? val))
       (tipo-list (t1) (list? val))
       (tipo-vector (t1) (vector? val))
       (tipo-dict (t1 t2) #t))))
@@ -154,6 +165,23 @@
            (iota len) decls)
           env)))))
 
+(define extend-env-tipado
+  (lambda (syms vals tipos env)
+    (begin
+      (for-each
+       (lambda (s v t)
+         (if (not (type-matches? t v))
+             (eopl:error 'extend-env-tipado
+                         "Error de tipo en el parametro ~s: se esperaba ~s y llego ~s"
+                         s (tipo->texto t) v)
+             #t))
+       syms vals tipos)
+      (extended-env-record syms
+                           (list->vector vals)
+                           tipos
+                           (map (lambda (s) #f) syms)
+                           env))))
+
 (define apply-env
   (lambda (env sym)
     (deref (apply-env-ref env sym))))
@@ -168,13 +196,38 @@
                              (if (number? pos)
                                  (a-ref pos vec (list-ref tipos pos) (list-ref consts pos))
                                  (apply-env-ref old-env sym)))))))
+
+(define-datatype procval procval?
+  (closure
+   (ids (list-of symbol?))
+   (tipos (list-of tipo?))
+   (body bloque?)
+   (env ambiente?)))
+
+(define apply-procedure
+  (lambda (proc args)
+    (cases procval proc
+      (closure (ids tipos body env)
+               (if (= (length ids) (length args))
+                   (eval-bloque body (extend-env-tipado ids args tipos env))
+                   (eopl:error 'apply-procedure
+                               "Numero de argumentos incorrecto: se esperaban ~s y llegaron ~s"
+                               (length ids) (length args)))))))
+
+(define truthy?
+  (lambda (x)
+    (cond
+      ((boolean? x) x)
+      ((number? x) (not (zero? x)))
+      (else (eopl:error 'condicion "La condicion debe ser numerica o booleana, llego ~s" x)))))
+
 ;;Evaluador
 (define eval-program
   (lambda (pgm)
     (cases programa pgm
       (un-programa (decls-globales cuerpo-main)
-                   (eval-expression cuerpo-main
-                                    (extend-env-globals decls-globales (empty-env)))))))
+                   (eval-bloque cuerpo-main
+                                (extend-env-globals decls-globales (empty-env)))))))
 
 (define eval-expression
   (lambda (exp env)
@@ -189,7 +242,64 @@
                         (setref!
                          (apply-env-ref env id)
                          (eval-expression rhs-exp env))
-                        1)))))
+                        1))
+      (lambda-exp (tipos ids body)
+                  (closure ids tipos body env))
+      (app-exp (id rands)
+               (let ((proc (apply-env env id))
+                     (args (eval-args rands env)))
+                 (if (procval? proc)
+                     (apply-procedure proc args)
+                     (eopl:error 'app-exp "Se intento aplicar algo que no es un procedimiento: ~s" id))))
+      (block-exp (blq)
+                 (eval-bloque blq env))
+      (locals-exp (decls blq)
+                  (eval-bloque blq (extend-env-globals decls env))))))
+
+(define eval-bloque
+  (lambda (blq env)
+    (cases bloque blq
+      (un-bloque (sents)
+                 (let loop ((ss sents) (ultimo 0))
+                   (if (null? ss)
+                       ultimo
+                       (loop (cdr ss) (eval-sentencia (car ss) env))))))))
+
+(define eval-sentencia
+  (lambda (sent env)
+    (cases sentencia sent
+      (sent-exp (e) (eval-expression e env))
+      (sent-return (e) (eval-expression e env))
+      (sent-if (c blq-then blq-else)
+               (if (truthy? (eval-expression c env))
+                   (eval-bloque blq-then env)
+                   (eval-bloque blq-else env)))
+      (sent-switch (e tests blqs blq-default)
+                   (let ((v (eval-expression e env)))
+                     (let loop ((ts tests) (bs blqs))
+                       (cond
+                         ((null? ts) (eval-bloque blq-default env))
+                         ((equal? v (eval-expression (car ts) env))
+                          (eval-bloque (car bs) env))
+                         (else (loop (cdr ts) (cdr bs)))))))
+      (sent-while (c blq)
+                  (let loop ((ultimo 0))
+                    (if (truthy? (eval-expression c env))
+                        (loop (eval-bloque blq env))
+                        ultimo)))
+      (sent-for (init c upd blq)
+                (begin
+                  (eval-expression init env)
+                  (let loop ((ultimo 0))
+                    (if (truthy? (eval-expression c env))
+                        (let ((v (eval-bloque blq env)))
+                          (eval-expression upd env)
+                          (loop v))
+                        ultimo)))))))
+
+(define eval-args
+  (lambda (rands env)
+    (map (lambda (x) (eval-expression x env)) rands)))
 
 ;;Extractores
 (define decl->id
@@ -240,4 +350,35 @@
                   (+ list-index-r 1)
                   #f))))))
 
-                                
+(eval-program (scan&parse "
+GLOBALS { proc id = lambda(int x) { return x; }; int a = 10; }
+PROGRAM { proc main() { return call id(a); } }"))
+
+(eval-program (scan&parse "
+GLOBALS { int a = 1; }
+PROGRAM { proc main() { return BLOCK { 1; 2; 3; }; } }"))
+
+(eval-program (scan&parse "
+GLOBALS { int a = 1; }
+PROGRAM { proc main() { return LOCALS { int z = 7; } { z; }; } }"))
+
+(eval-program (scan&parse "
+GLOBALS { int a = 1; }
+PROGRAM { proc main() { if (0) { 1; } else { 2; } } }"))
+
+(eval-program (scan&parse "
+GLOBALS { string color = \"rojo\"; }
+PROGRAM { proc main() {
+  switch color { case \"rojo\": { 1; } case \"verde\": { 2; } default: { 3; } }
+} }"))
+
+(eval-program (scan&parse "
+GLOBALS { string color = \"azul\"; }
+PROGRAM { proc main() {
+  switch color { case \"rojo\": { 1; } case \"verde\": { 2; } default: { 3; } }
+} }"))
+
+(eval-program (scan&parse "
+GLOBALS { int a = 10; proc cambia = lambda(int x) { set x -> 99; return x; }; }
+PROGRAM { proc main() { return BLOCK { call cambia(a); a; }; } }"))
+
